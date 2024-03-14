@@ -1,30 +1,26 @@
-`timescale 1ns/100ps
-
-// signal length
-`define Col_num_bit 6
-`define Col_num     1 << `Col_num_bit
-`define Row_num     16
-`define Com_leng    32
-// clock time
-`define period_pos  4
-`define period_neg  1
-`define F_delay     0.5
+`include "defines.v"
 
 module MUL_contorller(
-    output reg          clk,
-    output reg          F
+    output reg                  clk,
+    output reg                  F,
+///////////////////////////////////////////////////////////////
+///////////////////  To Superior Controller ///////////////////
+// controller interface:External load-store data
+    output reg                  ExLdSt_valid,//ExLdSt is one cycle command, always ready.
+    output reg [6:0]            ExLdSt_command,
+    inout      [`Row_num-1:0]   ExLdSt_data,
+// controller interface:Compute command
+    output reg                  Compute_valid,
+    output reg                  Compute_ready,
+    output reg [24:0]           Compute_command
+    
 );
-
 
 //////////////////////////////////////////////////////
 ///////////////////  Clock Control ///////////////////
-reg     rst;
 initial begin
     clk =   1'b1;
     F   =   1'b1;
-    rst =   1'b1;
-    #10
-    rst =   1'b0;
 end
 always begin
     #`period_pos    clk =   ~clk;
@@ -33,5 +29,12 @@ end
 always @(posedge clk) begin
     #`F_delay       F   =   ~F;
 end
+
+//////////////////////////////////////////////////////
+///////////////////  Command emitter ///////////////////
+
+
+
+
 
 endmodule
