@@ -7,7 +7,7 @@
 
 // signal length
 `define Col_num_bit         6
-`define Col_num             1 << `Col_num_bit
+`define Col_num             (1 << `Col_num_bit)
 `define Row_num             16
 
 // special address
