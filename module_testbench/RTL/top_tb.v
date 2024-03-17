@@ -1,4 +1,9 @@
-`include "defines.v"
+`timescale 1ns/100ps
+
+// signal length
+`define Col_num_bit         6
+`define Col_num             (1 << `Col_num_bit)
+`define Row_num             16
 
 module top_tb;   
 
@@ -21,12 +26,24 @@ wire  [`Col_num-1:0]  RWL_CH3              ;
 wire  [`Col_num-1:0]  WWL_CH1              ;
 wire  [`Col_num-1:0]  WWL_CH2              ;
 wire  [`Col_num-1:0]  RWWL_ExCH            ;
-wire  RWWL_ExCH_wen                        ;
-wire  RWWL_ExCH_ren                        ;
-wire  F_out                                ;
+wire  F_out                                ;              
+wire  AND_enable                           ;
+wire  XOR_enable                           ;
+wire  MUL_enable                           ;
+wire  Booth_Sel_H                          ;
+wire  Booth_Sel_L                          ;
+wire  Booth_wen                            ;
+wire  TWO_data                             ;
+wire  NEG_data                             ;
+wire  ZERO_data                            ;
+wire  Shift                                ;
+wire  NShift                               ;
+wire  Special_Add                          ;
+
 
 // MUL_contorller Bidirs
-wire  [`Row_num-1:0]  RWBL_ExCH            ;
+wire  [`Row_num-1:0]  RBL_ExCH             ;
+wire  [`Row_num-1:0]  WBL_ExCH             ;
 
 MUL_controller  u_MUL_controller (
     .clk                     ( clk                             ),
@@ -43,13 +60,25 @@ MUL_controller  u_MUL_controller (
     .WWL_CH1                 ( WWL_CH1          [`Col_num-1:0] ),
     .WWL_CH2                 ( WWL_CH2          [`Col_num-1:0] ),
     .RWWL_ExCH               ( RWWL_ExCH        [`Col_num-1:0] ),
-    .RWWL_ExCH_wen           ( RWWL_ExCH_wen                   ),
-    .RWWL_ExCH_ren           ( RWWL_ExCH_ren                   ),
-    .F_out                   ( F_out                           ),
 
     .ExLdSt_data             ( ExLdSt_data      [`Row_num-1:0] ),
-    .RWBL_ExCH               ( RWBL_ExCH        [`Row_num-1:0] )
-);
+    .RBL_ExCH                ( RBL_ExCH         [`Row_num-1:0] ),
+    .WBL_ExCH                ( WBL_ExCH         [`Row_num-1:0] ),
+
+    .F_out                   (F_out                            ),
+    .AND_enable              (AND_enable                       ),
+    .XOR_enable              (XOR_enable                       ),
+    .MUL_enable              (MUL_enable                       ),
+    .Booth_Sel_H             (Booth_Sel_H                      ),
+    .Booth_Sel_L             (Booth_Sel_L                      ),
+    .Booth_wen               (Booth_wen                        ),//write TWO/NEG forcely
+    .TWO_data                (TWO_data                         ),//force TWO=1/0
+    .NEG_data                (NEG_data                         ),//force NEG=1/0
+    .ZERO_data               (ZERO_data                        ),//force ZERO=1/0
+    .Shift                   (Shift                            ),
+    .NShift                  (NShift                           ),
+    .Special_Add             (Special_Add                      )
+);              
 MUL_controller_tb  u_MUL_controller_tb (
     .clk                     ( clk                             ),
     .F_in                    ( F_in                            ),

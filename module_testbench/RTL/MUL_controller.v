@@ -1,4 +1,14 @@
-`include "defines.v"
+`timescale 1ns/100ps
+
+// signal length
+`define Col_num_bit         6
+`define Col_num             (1 << `Col_num_bit)
+`define Row_num             16
+
+// special address
+`define All_zeros_addr      `Col_num_bit'b000000
+`define Booth_pipo_addr     `Col_num_bit'b111110
+`define MULsum_pipo_addr    `Col_num_bit'b111111
 
 module MUL_controller(
     input                       clk,
@@ -31,9 +41,8 @@ module MUL_controller(
 
 // response for Sum(hi)/external_data read-write to 'external sram'
     output     [`Col_num-1:0]   RWWL_ExCH,
-    inout      [`Row_num-1:0]   RWBL_ExCH,
-    output                      RWWL_ExCH_wen,//if 0,read from sram
-    output                      RWWL_ExCH_ren,//if 0,read from sram
+    output     [`Row_num-1:0]   WBL_ExCH,
+    input      [`Row_num-1:0]   RBL_ExCH,
     
 // compute control signals
     output                      F_out       ,
@@ -45,6 +54,7 @@ module MUL_controller(
     output                      Booth_wen   ,//write TWO/NEG forcely
     output                      TWO_data    ,//force TWO=1/0
     output                      NEG_data    ,//force NEG=1/0
+    output                      ZERO_data   ,//force ZERO=1/0
     output                      Shift       ,
     output                      NShift      ,
     output                      Special_Add 
@@ -58,8 +68,8 @@ assign                  RWWL_ExCH_ren       = {           1{ExLdSt_valid}} & (~E
 assign                  RWWL_ExCH_wen       = {           1{ExLdSt_valid}} & ExLdSt_command[6];
 wire [`Col_num_bit-1:0] RWWL_ExCH_addr      = {`Col_num_bit{ExLdSt_valid}} & ExLdSt_command[5:0];
 // external data select
-assign                  ExLdSt_data         = RWWL_ExCH_ren ? RWBL_ExCH     : `Row_num'bz;
-assign                  RWBL_ExCH           = RWWL_ExCH_wen ? ExLdSt_data   : `Row_num'bz;
+assign                  ExLdSt_data         = RWWL_ExCH_ren ? RBL_ExCH      : `Row_num'bz;
+assign                  WBL_ExCH            = RWWL_ExCH_wen ? ExLdSt_data   : `Row_num'bz;
 
 decoder decoder_RWWLEx  (ExLdSt_valid, RWWL_ExCH_addr, RWWL_ExCH);
 
@@ -95,16 +105,17 @@ wire                    MUL_counting        = Compute_MUL & (~MUL_finish);
 
 always @(posedge clk)   MUL_cycle           <= MUL_counting ? (MUL_cycle + 1'b1) : 5'b0;
 // MUL addr pingpong select
-wire [`Col_num_bit-1:0] Compute_MUL_rs1_addr= ({`Col_num_bit{MUL_start                     }}  & `All_zeros_addr   ) |//0 cycle
+wire [`Col_num_bit-1:0] Compute_MUL_rs1_addr= ({`Col_num_bit{~MUL_cycle[0]                 }}  & Compute_rs1_addr  ) |//0,2,4,6...cycle
+                                              ({`Col_num_bit{MUL_cycle[0]                  }}  & `Booth_pipo_addr  ) ;//1,3,5,7...cycle
+wire [`Col_num_bit-1:0] Compute_MUL_rd1_addr= ({`Col_num_bit{~MUL_cycle[0]                 }}  & `Booth_pipo_addr  ) |//0,2,4,6...cycle
+                                              ({`Col_num_bit{MUL_cycle[0]                  }}  & Compute_rs1_addr  ) ;//1,3,5,7...cycle;
+
+wire [`Col_num_bit-1:0] Compute_MUL_rs3_addr= ({`Col_num_bit{MUL_start                     }}  & `All_zeros_addr   ) |//0 cycle
                                               ({`Col_num_bit{(~MUL_start) | (~MUL_cycle[0])}}  & Compute_rd_addr   ) |//2,4,6...cycle
                                               ({`Col_num_bit{MUL_cycle[0]                  }}  & `MULsum_pipo_addr ) ;//1,3,5,7...cycle
-wire [`Col_num_bit-1:0] Compute_MUL_rd1_addr= ({`Col_num_bit{~MUL_cycle[0]                 }}  & `MULsum_pipo_addr ) |//0,2,4,6...cycle
+wire [`Col_num_bit-1:0] Compute_MUL_rd2_addr= ({`Col_num_bit{~MUL_cycle[0]                 }}  & `MULsum_pipo_addr ) |//0,2,4,6...cycle
                                               ({`Col_num_bit{MUL_cycle[0]                  }}  & Compute_rd_addr   ) ;//1,3,5,7...cycle;
 
-wire [`Col_num_bit-1:0] Compute_MUL_rs3_addr= ({`Col_num_bit{~MUL_cycle[0]                 }}  & Compute_rs1_addr  ) |//0,2,4,6...cycle
-                                              ({`Col_num_bit{MUL_cycle[0]                  }}  & `Booth_pipo_addr  ) ;//1,3,5,7...cycle
-wire [`Col_num_bit-1:0] Compute_MUL_rd2_addr= ({`Col_num_bit{~MUL_cycle[0]                 }}  & `Booth_pipo_addr  ) |//0,2,4,6...cycle
-                                              ({`Col_num_bit{MUL_cycle[0]                  }}  & Compute_rs1_addr  ) ;//1,3,5,7...cycle;
 
 ///////////////////  Compute control signals /////////////////////////
 assign                  AND_enable          = Compute_AND                                           ;
@@ -112,10 +123,11 @@ assign                  XOR_enable          = Compute_COPY | Compute_XOR | Compu
 assign                  MUL_enable          = Compute_MUL                                           ;
 assign                  Booth_Sel_H         = Compute_MUL & Compute_special_mode                    ;
 assign                  Booth_Sel_L         = Compute_MUL & (~Compute_special_mode)                 ;
-assign                  Booth_wen           = Compute_SHIFT | Compute_SUB                           ;//write TWO/NEG forcely
+assign                  Booth_wen           = ~Compute_MUL                                          ;//write TWO/NEG forcely
 assign                  TWO_data            = Compute_SHIFT                                         ;//force TWO=1/0
 assign                  NEG_data            = Compute_SUB                                           ;//force NEG=1/0
-assign                  Shift               = Compute_MUL                                           ;
+assign                  ZERO_data           = 1'b0                                                  ;//force TWO=1/0
+assign                  Shift               = MUL_counting                                          ;
 assign                  NShift              = Compute_ADD | Compute_SUB | (Compute_MUL & MUL_finish);
 assign                  Special_Add         = (Compute_ADD | Compute_SUB) & Compute_special_mode    ;
 
@@ -123,23 +135,22 @@ assign                  Special_Add         = (Compute_ADD | Compute_SUB) & Comp
 // ready
 assign                  Compute_ready       = ~MUL_counting;
 // address enable
-wire                    RWL_CH1_en          = Compute_valid & (~Compute_SHIFT);
-wire                    RWL_CH2_en          = Compute_valid & (~Compute_SHIFT);
-wire                    RWL_CH3_en          = Compute_MUL | Compute_SHIFT | Compute_ADD | Compute_SUB;
-wire                    WWL_CH1_en          = Compute_valid & (~Compute_SHIFT);
-wire                    WWL_CH2_en          = Compute_valid & (~(Compute_AND | Compute_XOR));
+wire                    RWL_CH1_en          = MUL_enable | Special_Add;
+wire                    RWL_CH2_en          = Compute_valid;
+wire                    RWL_CH3_en          = Compute_valid;
+wire                    WWL_CH1_en          = MUL_enable | Special_Add | AND_enable | XOR_enable;
+wire                    WWL_CH2_en          = MUL_enable | Compute_ADD | Compute_SUB ;
 // address select
-wire [`Col_num_bit-1:0] RWL_CH1_addr        = ({`Col_num_bit{Compute_MUL               }} & Compute_MUL_rs1_addr   ) | 
-                                              ({`Col_num_bit{~Compute_MUL              }} & Compute_rs1_addr       ) ;
-wire [`Col_num_bit-1:0] RWL_CH2_addr        = Compute_rs2_addr                                            ;
-wire [`Col_num_bit-1:0] RWL_CH3_addr        = ({`Col_num_bit{Compute_MUL               }} & Compute_MUL_rs3_addr   ) | 
-                                              ({`Col_num_bit{Compute_SHIFT             }} & Compute_rs1_addr       ) | 
-                                              ({`Col_num_bit{Compute_ADD | Compute_SUB }} & {Compute_rs2_addr[`Col_num_bit-1:1],1'b1}) ;
-wire [`Col_num_bit-1:0] WWL_CH1_addr        = ({`Col_num_bit{Compute_MUL               }} & Compute_MUL_rd1_addr   ) | 
-                                              ({`Col_num_bit{~Compute_MUL              }} & Compute_rd_addr        ) ;
-wire [`Col_num_bit-1:0] WWL_CH2_addr        = ({`Col_num_bit{Compute_MUL               }} & Compute_MUL_rd2_addr   ) | 
-                                              ({`Col_num_bit{Compute_SHIFT             }} & Compute_rd_addr        ) | 
-                                              ({`Col_num_bit{Compute_ADD | Compute_SUB }} & {Compute_rd_addr[`Col_num_bit-1:1],1'b1}) ;
+wire [`Col_num_bit-1:0] RWL_CH1_addr        = ({`Col_num_bit{Special_Add               }} & {Compute_rs1_addr[`Col_num_bit-1:1],1'b1}) |
+                                              ({`Col_num_bit{MUL_enable                }} & Compute_MUL_rs1_addr   ) ; 
+wire [`Col_num_bit-1:0] RWL_CH2_addr        = Compute_rs1_addr                                                       ;
+wire [`Col_num_bit-1:0] RWL_CH3_addr        = ({`Col_num_bit{~MUL_enable               }} & Compute_rs2_addr       ) |
+                                              ({`Col_num_bit{MUL_enable                }} & Compute_MUL_rs3_addr   ) ;
+wire [`Col_num_bit-1:0] WWL_CH1_addr        = ({`Col_num_bit{AND_enable | XOR_enable   }} & Compute_rd_addr        ) | 
+                                              ({`Col_num_bit{Compute_MUL               }} & Compute_MUL_rd1_addr   ) |
+                                              ({`Col_num_bit{Special_Add               }} & {Compute_rd_addr[`Col_num_bit-1:1],1'b1}) ;
+wire [`Col_num_bit-1:0] WWL_CH2_addr        = ({`Col_num_bit{Compute_ADD | Compute_SUB }} & Compute_rd_addr        ) | 
+                                              ({`Col_num_bit{Compute_MUL               }} & Compute_MUL_rd2_addr   ) ;
 //decoder
 decoder decoder_RWL1        (RWL_CH1_en, RWL_CH1_addr, RWL_CH1);
 decoder decoder_RWL2        (RWL_CH2_en, RWL_CH2_addr, RWL_CH2);

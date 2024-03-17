@@ -1,4 +1,14 @@
-`include "defines.v"
+`timescale 1ns/100ps
+
+// clock time
+`define period_pos  4
+`define period_neg  1
+`define F_delay     0.5
+
+// signal length
+`define Col_num_bit         6
+`define Col_num             (1 << `Col_num_bit)
+`define Row_num             16
 
 module MUL_controller_tb(
     output reg                  clk             ,
