@@ -1,9 +1,9 @@
 `timescale 1ns/100ps
 
 // signal length
-`define Col_num_bit         6
-`define Col_num             (1 << `Col_num_bit)
-`define Row_num             16
+`define Row_num_bit         6
+`define Row_num             (1 << `Row_num_bit)
+`define Col_num             16
 
 module top_tb;   
 
@@ -16,16 +16,16 @@ wire  Compute_valid                        ;
 wire  [24:0]  Compute_command              ;
 
 // MUL_contorller_tb Bidirs
-wire  [`Row_num-1:0]  ExLdSt_data          ;
+wire  [`Col_num-1:0]  ExLdSt_data          ;
 
 // MUL_contorller Outputs
 wire  Compute_ready                        ;
-wire  [`Col_num-1:0]  RWL_CH1              ;
-wire  [`Col_num-1:0]  RWL_CH2              ;
-wire  [`Col_num-1:0]  RWL_CH3              ;
-wire  [`Col_num-1:0]  WWL_CH1              ;
-wire  [`Col_num-1:0]  WWL_CH2              ;
-wire  [`Col_num-1:0]  RWWL_ExCH            ;
+wire  [`Row_num-1:0]  RWL_CH1              ;
+wire  [`Row_num-1:0]  RWL_CH2              ;
+wire  [`Row_num-1:0]  RWL_CH3              ;
+wire  [`Row_num-1:0]  WWL_CH1              ;
+wire  [`Row_num-1:0]  WWL_CH2              ;
+wire  [`Row_num-1:0]  RWWL_ExCH            ;
 wire  F_out                                ;              
 wire  AND_enable                           ;
 wire  XOR_enable                           ;
@@ -42,8 +42,8 @@ wire  Special_Add                          ;
 
 
 // MUL_contorller Bidirs
-wire  [`Row_num-1:0]  RBL_ExCH             ;
-wire  [`Row_num-1:0]  WBL_ExCH             ;
+wire  [`Col_num-1:0]  RBL_ExCH             ;
+wire  [`Col_num-1:0]  WBL_ExCH             ;
 
 MUL_controller  u_MUL_controller (
     .clk                     ( clk                             ),
@@ -54,16 +54,16 @@ MUL_controller  u_MUL_controller (
     .Compute_command         ( Compute_command  [24:0]         ),
 
     .Compute_ready           ( Compute_ready                   ),
-    .RWL_CH1                 ( RWL_CH1          [`Col_num-1:0] ),
-    .RWL_CH2                 ( RWL_CH2          [`Col_num-1:0] ),
-    .RWL_CH3                 ( RWL_CH3          [`Col_num-1:0] ),
-    .WWL_CH1                 ( WWL_CH1          [`Col_num-1:0] ),
-    .WWL_CH2                 ( WWL_CH2          [`Col_num-1:0] ),
-    .RWWL_ExCH               ( RWWL_ExCH        [`Col_num-1:0] ),
+    .RWL_CH1                 ( RWL_CH1          [`Row_num-1:0] ),
+    .RWL_CH2                 ( RWL_CH2          [`Row_num-1:0] ),
+    .RWL_CH3                 ( RWL_CH3          [`Row_num-1:0] ),
+    .WWL_CH1                 ( WWL_CH1          [`Row_num-1:0] ),
+    .WWL_CH2                 ( WWL_CH2          [`Row_num-1:0] ),
+    .RWWL_ExCH               ( RWWL_ExCH        [`Row_num-1:0] ),
 
-    .ExLdSt_data             ( ExLdSt_data      [`Row_num-1:0] ),
-    .RBL_ExCH                ( RBL_ExCH         [`Row_num-1:0] ),
-    .WBL_ExCH                ( WBL_ExCH         [`Row_num-1:0] ),
+    .ExLdSt_data             ( ExLdSt_data      [`Col_num-1:0] ),
+    .RBL_ExCH                ( RBL_ExCH         [`Col_num-1:0] ),
+    .WBL_ExCH                ( WBL_ExCH         [`Col_num-1:0] ),
 
     .F_out                   (F_out                            ),
     .AND_enable              (AND_enable                       ),
@@ -88,7 +88,7 @@ MUL_controller_tb  u_MUL_controller_tb (
     .Compute_ready           ( Compute_ready                   ),
     .Compute_command         ( Compute_command  [24:0]         ),
 
-    .ExLdSt_data             ( ExLdSt_data      [`Row_num-1:0] )
+    .ExLdSt_data             ( ExLdSt_data      [`Col_num-1:0] )
 );
 
 endmodule

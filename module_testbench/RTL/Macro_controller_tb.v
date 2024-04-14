@@ -10,11 +10,11 @@
 `define Col_num             (1 << `Col_num_bit)
 `define Row_num             16
 
-module MUL_controller_tb(
+module Macro_controller_tb(
     output reg                  clk             ,
     output reg                  F_in            ,
 ///////////////////////////////////////////////////////////////
-///////////////////  To Superior Controller ///////////////////
+///////////////////  From Superior Controller ///////////////////
 // controller interface:External load-store data
     output reg                  ExLdSt_valid    ,//ExLdSt is one cycle command, always ready.
     output reg [6:0]            ExLdSt_command  ,
