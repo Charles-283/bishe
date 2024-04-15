@@ -22,13 +22,14 @@
 // Macro mode
 `define addr_incr_num_bit   7
 
-module MUL_controller(
+module Master_controller(
     input                       clk,
     input                       rst_n,
 
 ///////////////////////////////////////////////////////////////
 ///////////////////  From CPU Peripheral Bus ///////////////////
     input                       CPU_instruction_valid,
+    output                      CPU_instruction_irq,//interrupt signal, means finish.
     input   [`instr_num_bit:0]  CPU_instruction_addr,//Because the CPU bus width is 32, it takes 2 cycles to write a full 64-bit instruction.
     input   [31:0]              CPU_instruction_data,
 
@@ -125,31 +126,18 @@ module MUL_controller(
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////  register table list ///////////////////////////////////////////////////
-reg  [63:0]                     instr_table      [0:`instr_num-1]       ;
-reg  [`ddr_addr_len-1:0]        ddr_addr_table   [0:`ddr_addr_num-1]    ;
-reg  [`counter_len-1:0]         counter_table    [0:`counter_num-1]     ;
-reg  [`instr_num_bit-1:0]       stack_table      [0:`counter_num-1]     ;
+reg  [63:0]                     instr_table         [0:`instr_num-2]                                ;//The last item as the status_register, controls the start signal(instr_valid)
+reg  [1:0]                      status_register                                                     ;//store the instr_valid + finish signal
+reg  [`instr_num_bit-1:0]       instr_addr                                                          ;
+reg  [`ddr_addr_len-1:0]        ddr_addr_table      [0:`ddr_addr_num-1]                             ;
+reg  [`counter_len-1:0]         counter_table       [0:`counter_num-1]                              ;
+reg  [`instr_num_bit-1:0]       stack_table         [0:`counter_num-1]                              ;
 
-
-////////////////////////////////////////////////////////////////////////////////////////
-///////////////////  Loop Branch  //////////////////////////////////////////
-// counter  
-wire                            counter_all_zero    = (counter_table[stk_cnt_addr] == `counter_len'b0);
-wire                            counting            = stk_cnt_valid & (~counter_all_zero)           ;
-wire                            counting_done       = stk_cnt_valid & ( counter_all_zero)           ;
-// instruction counter(similar to the PC of CPU) increment
-reg                             instr_valid                             ;
-reg  [`instr_num-1:0]           instr_addr                              ;
-always @(posedge clk) begin
-    if (~rst_n) 
-        instr_addr <= `instr_num'b0     ;
-    else if (instr_valid)
-        instr_addr <= counting_done ? stack_table[stk_cnt_addr] : (instr_addr + 1'b1);
-end
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////  instruction decoder ///////////////////////////////////////////////////
-wire [63:0]                    instruction          = instr_table[instr_addr]                       ;
+wire                            instr_valid         = status_register[0]                            ;
+wire [63:0]                     instruction         = instr_table[instr_addr]                       ;
 ///////////////////  load register table(LRT) instruction decoder //////////////////////////////////////////
 wire                            LRT_instr_valid     = instr_valid & (~instruction[63])              ;//if mode=0,there is load register table.
 wire [50:0]                     LRT_instr           = {51{LRT_instr_valid}} & instruction[50:0]     ;
@@ -164,7 +152,7 @@ wire [`instr_num_bit-1:0]       Ld_stack            = LRT_instr[42:35]          
 wire [`counter_len-1:0]         Ld_counter          = LRT_instr[34:25]                              ;
 wire [`ddr_addr_len-1:0]        Ld_ddr_addr         = LRT_instr[24:0]                               ;
 ///////////////////  Macro instruction decoder ///////////////////////////////////////////////////////////
-wire                            Macro_instr_valid   = instruction_valid & instruction[63]           ;//if mode=1,there is load DCIM macro and compute.
+wire                            Macro_instr_valid   = instr_valid & instruction[63]           ;//if mode=1,there is load DCIM macro and compute.
 wire [62:0]                     Macro_instr         = {63{Macro_instr_valid}} & instruction[62:0]   ;
 
 wire                            stk_cnt_valid       = Macro_instr[62]                               ;
@@ -184,34 +172,96 @@ wire [`Row_num_bit:0]           ExLdSt_command      = Macro_instr[39:33]        
 wire [`Macro_num-1:0]           Compute_macro_sel   = Macro_instr[32:25]                            ;
 wire [24:0]                     Compute_command     = Macro_instr[24:0]                             ;
 
+////////////////////////////////////////////////////////////////////////////////////////
+///////////////////  instruction  //////////////////////////////////////////
+// CPU write instruction to instr_table
+always @(posedge clk) begin
+    if (CPU_instruction_valid)
+        if (CPU_instruction_addr[0])
+            instr_table[CPU_instruction_addr[`instr_num_bit-1:1]][31: 0] <= CPU_instruction_data    ;
+        else                                                
+            instr_table[CPU_instruction_addr[`instr_num_bit-1:1]][63:32] <= CPU_instruction_data    ;
+end
+// instruction start excution and finish
+assign                          CPU_instruction_irq = status_register[1]                            ;
+always @(posedge clk) begin
+    if (|CPU_instruction_addr | instruction[63:62] == 2'b01) begin//when in LRT mode and instr[62]=1,there means finish signal.
+        status_register[0] <= ((|CPU_instruction_addr) & CPU_instruction_data[0])                   &
+                              ((instruction[63:62] == 2'b01) & 1'b0)                                ;
+        status_register[1] <= (instruction[63:62] == 2'b01)                                         ;
+    end
+end
+// instruction counter(similar to the PC of CPU) increment and Loop Branch
+wire                            counting_done                                                       ;
+always @(posedge clk) begin
+    if (~rst_n) 
+        instr_addr <= `instr_num_bit'b0                                                             ;
+    else if (counting_done)
+        instr_addr <= stack_table[stk_cnt_addr]                                                     ;
+    else if (instr_valid)
+        instr_addr <= (instr_addr + 1'b1)                                                           ;
+end
+
+
+////////////////////////////////////////////////////////////////////////////////////////
+///////////////////  load register table(LRT) mode /////////////////////////////////////
+// counter  
+wire                            counter_all_zero    = (counter_table[stk_cnt_addr] == `counter_len'b0);
+wire                            counting            = stk_cnt_valid & (~counter_all_zero)           ;
+assign                          counting_done       = stk_cnt_valid & ( counter_all_zero)           ;
+// load register table
+always @(posedge clk) begin
+    if (Ld_stk_cnt_valid)
+        stack_table     [Ld_stk_cnt_addr]   <= Ld_stack                                             ;
+    
+    if(counting)    
+        counter_table   [stk_cnt_addr]      <= counter_table[stk_cnt_addr] - 1'b1                   ;
+    else if (Ld_stk_cnt_valid)
+        counter_table   [Ld_stk_cnt_addr]   <= Ld_counter                                           ;
+
+    if(addr_incr_valid)
+        ddr_addr_table  [ExLdSt_ddr_addr]   <= ddr_addr_table[ExLdSt_ddr_addr] + addr_incr_addr     ;
+    else if (Ld_ddr_addr_valid) 
+        ddr_addr_table  [Ld_ddr_addr_addr]  <= Ld_ddr_addr                                          ;
+end
+
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////  Macro mode ////////////////////////////////////////////////////////
 ///////////////////  pipeline technique  //////////////////////////////////////////
-reg  [33:0]                     command_pipeline_reg    [0:7]                                       ;//ExLdSt_command_7bits+Compute_command_25bits=32bits+2bits=34bits
+reg  [33:0]                     command_pipeline_reg    [0:(`Macro_num-1)]                                       ;//ExLdSt_command_7bits+Compute_command_25bits=32bits+2bits=34bits
 wire                            ExLdSt_pipe_valid   = ExLdSt_macro_sel[0]                           ;
 wire                            Compute_pipe_valid  = Compute_macro_sel[0]                          ;
 
 reg  [2:0]                      pipeline_counter                                                    ;
-wire                            pine_clk            = (pipeline_counter == pipeline_latency + 1'b1) ;
+wire                            pipeline_counter_match = (pipeline_counter == pipeline_latency + 1'b1) ;
 always @(posedge clk) begin
     if (~rst_n)
-        pipeline_counter <= 3'b0;
+        pipeline_counter <= 3'b0                                                                    ;
     else if (pipeline_en) 
         pipeline_counter <= pipeline_counter_match ? 3'b0 : pipeline_counter + 1'b1                 ;
 end
-
-always @(posedge pine_clk) begin
+integer i;
+always @(posedge pipeline_counter_match) begin
     command_pipeline_reg[0] <= pipeline_en ? {ExLdSt_pipe_valid,ExLdSt_command,Compute_pipe_valid,Compute_command} : 34'b0;
-    for (int i=0; i<7; i++)
-        command_pipeline_reg[i+1] <= command_pipeline_reg[i];
+    for (i=0; i<(`Macro_num-1); i=i+1) begin
+        command_pipeline_reg[i+1] <= command_pipeline_reg[i]                                        ;
+    end
 end
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////  ExLdSt Command  //////////////////////////////////////////
-assign                          ExLdSt_valid        = (ExLdSt_macro_selmode != 2'b00) | (|command_pipeline_reg[:][33]);
-wire                            ExLdSt_sel_single   = (ExLdSt_macro_selmode == 2'b01) | (|command_pipeline_reg[:][33]);
+wire                            ExLdSt_valid_pipe   = command_pipeline_reg[0][33]                   |
+                                                      command_pipeline_reg[1][33]                   |
+                                                      command_pipeline_reg[2][33]                   |
+                                                      command_pipeline_reg[3][33]                   |
+                                                      command_pipeline_reg[4][33]                   |
+                                                      command_pipeline_reg[5][33]                   |
+                                                      command_pipeline_reg[6][33]                   |
+                                                      command_pipeline_reg[7][33]                   ;
+wire                            ExLdSt_valid        = (ExLdSt_macro_selmode != 2'b00) | ExLdSt_valid_pipe;
+wire                            ExLdSt_sel_single   = (ExLdSt_macro_selmode == 2'b01) | ExLdSt_valid_pipe;
 wire                            ExLdSt_sel_spfull   = (ExLdSt_macro_selmode == 2'b10)               ; 
 wire                            ExLdSt_sel_full     = (ExLdSt_macro_selmode == 2'b11)               ; 
 wire                            ExLdSt_sel_0        = (ExLdSt_macro_sel == 3'b000) | command_pipeline_reg[0][33];
@@ -239,8 +289,8 @@ assign                          {ExLdSt_valid_0,
                                  ExLdSt_valid_4,
                                  ExLdSt_valid_5,
                                  ExLdSt_valid_6,
-                                 ExLdSt_valid_7}    = ({`Macro_num{ExLdSt_sel_single}} & ExLdSt_valid_single) | 
-                                                      ({`Macro_num{ExLdSt_sel_spfull | ExLdSt_sel_full}});
+                                 ExLdSt_valid_7}    = ({`Macro_num{ExLdSt_sel_single}} & ExLdSt_valid_single)   | 
+                                                      ({`Macro_num{ExLdSt_sel_spfull | ExLdSt_sel_full}})       ;
 // command signal
 wire [`Row_num_bit:0]           ExLdSt_command_single=({(`Row_num_bit+1){ExLdSt_sel_0}} & ExLdSt_command) |
                                                       ({(`Row_num_bit+1){ExLdSt_sel_1}} & ExLdSt_command) |
@@ -276,7 +326,7 @@ wire [`Macro_num*`Col_num-1:0]  DRAM_rd_data_spfull = {{`Macro_num{DRAM_rd_data[
                                                        {`Macro_num{DRAM_rd_data[ 95: 80]}}          ,
                                                        {`Macro_num{DRAM_rd_data[111: 96]}}          ,
                                                        {`Macro_num{DRAM_rd_data[127:112]}}}         ;  
-wire [`Macro_num*`Col_num-1:0]  DRAM_rd_data_full   = {`Macro_num{DRAM_rd_data}};
+wire [`Macro_num*`Col_num-1:0]  DRAM_rd_data_full   = {`Macro_num{DRAM_rd_data}}                    ;
 assign                          {ExLdSt_wr_data_0,
                                  ExLdSt_wr_data_1,
                                  ExLdSt_wr_data_2,
@@ -289,7 +339,15 @@ assign                          {ExLdSt_wr_data_0,
                                                       ({(`Macro_num*`Col_num){ExLdSt_sel_full  }} & DRAM_rd_data_full  ) ;
 ///////////////////  DRAM Interface  //////////////////////////////////////////
 assign                          DRAM_valid          = ExLdSt_valid                                  ;
-assign                          DRAM_wr_en          = ~(ExLdSt_command[`Row_num_bit] | (|command_pipeline_reg[:][32]));
+wire                            ExLdSt_wr_en_pipe   = command_pipeline_reg[0][32]                   |
+                                                      command_pipeline_reg[1][32]                   |
+                                                      command_pipeline_reg[2][32]                   |
+                                                      command_pipeline_reg[3][32]                   |
+                                                      command_pipeline_reg[4][32]                   |
+                                                      command_pipeline_reg[5][32]                   |
+                                                      command_pipeline_reg[6][32]                   |
+                                                      command_pipeline_reg[7][32]                   ;
+assign                          DRAM_wr_en          = ~(ExLdSt_command[`Row_num_bit] | ExLdSt_wr_en_pipe);
 assign                          DRAM_addr           = ddr_addr_table[ExLdSt_ddr_addr]               ;
 wire [`Col_num-1:0]             DRAM_wr_data_single = ({`Col_num{ExLdSt_sel_0}} & ExLdSt_rd_data_0) |
                                                       ({`Col_num{ExLdSt_sel_1}} & ExLdSt_rd_data_1) |
@@ -303,8 +361,16 @@ assign                          DRAM_wr_data        = {`Col_num{~DRAM_wr_en}} & 
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
-///////////////////  Compute Command  //////////////////////////////////////////
+///////////////////  Compute Macro 0-7 Command  //////////////////////////////////////////
 // valid signal
+wire [`Macro_num-1:0]           Compute_valid_pipe  = {command_pipeline_reg[0][25],
+                                                       command_pipeline_reg[1][25],
+                                                       command_pipeline_reg[2][25],
+                                                       command_pipeline_reg[3][25],
+                                                       command_pipeline_reg[4][25],
+                                                       command_pipeline_reg[5][25],
+                                                       command_pipeline_reg[6][25],
+                                                       command_pipeline_reg[7][25]};
 assign                          {Compute_valid_0,
                                  Compute_valid_1,
                                  Compute_valid_2,
@@ -312,8 +378,16 @@ assign                          {Compute_valid_0,
                                  Compute_valid_4,
                                  Compute_valid_5,
                                  Compute_valid_6,
-                                 Compute_valid_7}   = pipeline_en ? command_pipeline_reg[:][25] : Compute_macro_sel;
+                                 Compute_valid_7}   = pipeline_en ? Compute_valid_pipe : Compute_macro_sel;
 // command signal
+wire [`Macro_num*25-1:0]        Compute_command_pipe= {command_pipeline_reg[0][24:0],
+                                                       command_pipeline_reg[1][24:0],
+                                                       command_pipeline_reg[2][24:0],
+                                                       command_pipeline_reg[3][24:0],
+                                                       command_pipeline_reg[4][24:0],
+                                                       command_pipeline_reg[5][24:0],
+                                                       command_pipeline_reg[6][24:0],
+                                                       command_pipeline_reg[7][24:0]};
 assign                          {Compute_command_0,
                                  Compute_command_1,
                                  Compute_command_2,
@@ -321,24 +395,6 @@ assign                          {Compute_command_0,
                                  Compute_command_4,
                                  Compute_command_5,
                                  Compute_command_6,
-                                 Compute_command_7} = pipeline_en ? command_pipeline_reg[:][24:0] : Compute_command;
-
-////////////////////////////////////////////////////////////////////////////////////////
-///////////////////  load register table(LRT) mode /////////////////////////////////////
-always @(posedge clk) begin
-    if (Ld_stk_cnt_valid)
-        stack_table     [Ld_stk_cnt_addr]   <= Ld_stack_addr                                    ;
-    
-    if(counting)    
-        counter_table   [stk_cnt_addr]      <= counter_table[stk_cnt_addr] - 1'b1               ;
-    else if (Ld_stk_cnt_valid)
-        counter_table   [Ld_stk_cnt_addr]   <= Ld_counter                                       ;
-
-    if(addr_incr_valid)
-        ddr_addr_table  [ExLdSt_ddr_addr]   <= ddr_addr_table[ExLdSt_ddr_addr] + addr_incr_addr  ;
-    else if (Ld_ddr_addr_valid) 
-        ddr_addr_table  [Ld_ddr_addr_addr]  <= Ld_ddr_addr                                       ;
-end
-
+                                 Compute_command_7} = pipeline_en ? Compute_command_pipe : Compute_command;
 
 endmodule

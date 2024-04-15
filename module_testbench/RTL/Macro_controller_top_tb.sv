@@ -45,7 +45,7 @@ wire  Special_Add                          ;
 wire  [`Col_num-1:0]  RBL_ExCH             ;
 wire  [`Col_num-1:0]  WBL_ExCH             ;
 
-MUL_controller  u_MUL_controller (
+Macro_controller  u_Macro_controller (
     .clk                     ( clk                             ),
     .F_in                    ( F_in                            ),
     .ExLdSt_valid            ( ExLdSt_valid                    ),
@@ -79,7 +79,7 @@ MUL_controller  u_MUL_controller (
     .NShift                  (NShift                           ),
     .Special_Add             (Special_Add                      )
 );              
-MUL_controller_tb  u_MUL_controller_tb (
+Macro_controller_tb  u_Macro_controller_tb (
     .clk                     ( clk                             ),
     .F_in                    ( F_in                            ),
     .ExLdSt_valid            ( ExLdSt_valid                    ),
