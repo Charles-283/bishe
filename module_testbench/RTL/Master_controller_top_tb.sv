@@ -3,7 +3,7 @@
 // signal length
 `define Row_num_bit         6
 `define Row_num             (1 << `Row_num_bit)
-`define Col_num             16
+`define Col_num             128
 // Main Control parameter
 //The depth of the instruction register memory is set to 256 64-bit wide instructions by default.
 `define instr_num_bit       8
@@ -83,7 +83,7 @@ wire  [`Col_num-1:0]  ExLdSt_wr_data_7     ;
 wire  Compute_valid_7                      ;
 wire  [24:0]  Compute_command_7            ;
 
-initial $readmemh ("./instruction.data", u_Master_controller.instr_table);
+initial $readmemh ("./memory_data/instruction.data", u_Master_controller.instr_table);
 
 CPU_tb  u_CPU_tb (
     .CPU_instruction_irq                        ( CPU_instruction_irq                         ),

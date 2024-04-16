@@ -26,7 +26,7 @@ initial begin
     clk                     = 1'b1;
     rst_n                   = 1'b0;
     #10         
-    rst_n                   = 1'b0;
+    rst_n                   = 1'b1;
 end         
 always begin            
     #`period_pos                      
@@ -39,16 +39,21 @@ end
 /////////////////// instruction emitter ///////////////////
 initial begin
     CPU_instruction_valid   = 1'b0;
-    CPU_instruction_addr    = (`instr_num_bit+1)'b0;
+    CPU_instruction_addr    = 9'b0;
     CPU_instruction_data    = 32'b0;
 
-    #20
+    #18
     CPU_instruction_valid   = 1'b1;
-    CPU_instruction_addr    = (`instr_num_bit+1)'h1ff;
+    CPU_instruction_addr    = 9'h1ff;
     CPU_instruction_data    = 32'b1;
 
-    while(CPU_instruction_irq);
+    @(posedge clk);
+    CPU_instruction_valid   = 1'b0;
+    CPU_instruction_addr    = 9'b0;
+    CPU_instruction_data    = 32'b0;
 
+    @(posedge CPU_instruction_irq);
+    
     $display("The computation is finish!!!");
     $stop;
 end

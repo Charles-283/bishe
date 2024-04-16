@@ -17,8 +17,8 @@ module DRAM_tb(
     input  [`Col_num-1:0]       DRAM_wr_data
 );
 
-reg  [`Col_num-1:0]             DRAM_memory         [0:65535];
-initial $readmemh ("./DRAM_memory.data", DRAM_memory);
+reg  [`Col_num-1:0]             DRAM_memory         [0:2047];
+initial $readmemh ("./memory_data/DRAM_memory.data", DRAM_memory);
 
 assign DRAM_rd_data             = {`Col_num{DRAM_valid & (~DRAM_wr_en)}} & DRAM_memory[DRAM_addr];
 

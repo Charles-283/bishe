@@ -11,7 +11,7 @@ vlog -O5 -vopt "../RTL/Master_controller_top_tb.sv" -work work
 vlog -O5 -vopt "../RTL/CPU_tb.sv" -work work
 vlog -O5 -vopt "../RTL/DRAM_tb.sv" -work work
 
-vsim  -voptargs="+acc" -L work top_tb
+vsim -voptargs="+acc" -sva -nowlflock -wlf "vsim.wlf" -L work top_tb
 
 log -r /*
 
