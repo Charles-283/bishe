@@ -15,6 +15,6 @@ vsim -voptargs="+acc" -sva -nowlflock -wlf "vsim.wlf" -L work top_tb
 
 log -r /*
 
-# do master_wave.do
+do master_wave.do
 
 run 100ns

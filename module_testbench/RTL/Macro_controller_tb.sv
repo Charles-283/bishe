@@ -1,9 +1,9 @@
 `timescale 1ns/100ps
 
 // clock time
-`define period_pos  4
+`define period_pos  1
 `define period_neg  1
-`define F_delay     0.5
+`define F_delay     0.8
 
 // signal length
 `define Col_num_bit         6

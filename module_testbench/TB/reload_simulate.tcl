@@ -11,4 +11,4 @@ vlog -O5 -vopt -incr "../RTL/DRAM_tb.sv" -work work
 
 restart
 
-run 100ns
+run 1us

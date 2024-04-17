@@ -191,11 +191,12 @@ always @(posedge clk) begin
     end
 end
 // instruction counter(similar to the PC of CPU) increment and Loop Branch
-wire                            counting_done                                                       ;
+wire                            counter_all_zero    = (counter_table[stk_cnt_addr] == `counter_len'b0);
+wire                            counting            = stk_cnt_valid & (~counter_all_zero)           ;
 always @(posedge clk) begin
     if (~rst_n) 
         instr_addr <= `instr_num_bit'b0                                                             ;
-    else if (counting_done)
+    else if (counting)
         instr_addr <= stack_table[stk_cnt_addr]                                                     ;
     else if (instr_valid)
         instr_addr <= (instr_addr + 1'b1)                                                           ;
@@ -203,11 +204,7 @@ end
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
-///////////////////  load register table(LRT) mode /////////////////////////////////////
-// counter  
-wire                            counter_all_zero    = (counter_table[stk_cnt_addr] == `counter_len'b0);
-wire                            counting            = stk_cnt_valid & (~counter_all_zero)           ;
-assign                          counting_done       = stk_cnt_valid & ( counter_all_zero)           ;
+///////////////////  load register table(LRT) mode ///////////////////////////////////// 
 // load register table
 always @(posedge clk) begin
     if (Ld_stk_cnt_valid)
@@ -228,58 +225,71 @@ end
 ////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////  Macro mode ////////////////////////////////////////////////////////
 ///////////////////  pipeline technique  //////////////////////////////////////////
-reg  [33:0]                     command_pipeline_reg    [0:(`Macro_num-1)]                                       ;//ExLdSt_command_7bits+Compute_command_25bits=32bits+2bits=34bits
-wire                            ExLdSt_pipe_valid   = ExLdSt_macro_sel[0]                           ;
+reg  [33:0]                     command_pipeline_reg    [0:(`Macro_num-2)]                                       ;//ExLdSt_command_7bits+Compute_command_25bits=32bits+2bits=34bits
+wire                            ExLdSt_pipe_valid   = (ExLdSt_macro_selmode == 2'b01)               ;
 wire                            Compute_pipe_valid  = Compute_macro_sel[0]                          ;
 
-reg  [2:0]                      pipeline_counter                                                    ;
-wire                            pipeline_clk        = (pipeline_counter == pipeline_latency + 1'b1) ;
+reg  [1:0]                      pipeline_counter                                                    ;
+wire                            pipeline_cnt_match  = (pipeline_counter == pipeline_latency)        ;
 always @(posedge clk) begin
-    if (~rst_n)
+    if (~rst_n) begin
         pipeline_counter <= 3'b0                                                                    ;
-    else if (pipeline_en) 
-        pipeline_counter <= pipeline_clk ? 3'b0 : pipeline_counter + 1'b1                 ;
-end
-always @(posedge pipeline_clk) begin
-    command_pipeline_reg[0] <= pipeline_en ? {ExLdSt_pipe_valid,ExLdSt_command,Compute_pipe_valid,Compute_command} : 34'b0;
-    for (integer i=0; i<(`Macro_num-1); i=i+1) begin
-        command_pipeline_reg[i+1] <= command_pipeline_reg[i]                                        ;
+        for (integer i=0; i<(`Macro_num-1); i=i+1) begin
+            command_pipeline_reg[i] <= 34'b0                                                        ;
+        end
+    end
+    else if (pipeline_en) begin
+        pipeline_counter <= pipeline_cnt_match ? 2'b0 : pipeline_counter + 1'b1 ;
+        if (pipeline_cnt_match) begin
+            command_pipeline_reg[0] <= {ExLdSt_pipe_valid,ExLdSt_command,Compute_pipe_valid,Compute_command};
+            for (integer i=0; i<(`Macro_num-2); i=i+1) begin
+                command_pipeline_reg[i+1] <= command_pipeline_reg[i]                                        ;
+            end
+        end
     end
 end
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////  ExLdSt Command  //////////////////////////////////////////
-wire                            ExLdSt_valid_pipe   = command_pipeline_reg[0][33]                   |
-                                                      command_pipeline_reg[1][33]                   |
-                                                      command_pipeline_reg[2][33]                   |
-                                                      command_pipeline_reg[3][33]                   |
-                                                      command_pipeline_reg[4][33]                   |
-                                                      command_pipeline_reg[5][33]                   |
-                                                      command_pipeline_reg[6][33]                   |
-                                                      command_pipeline_reg[7][33]                   ;
-wire                            ExLdSt_valid        = (ExLdSt_macro_selmode != 2'b00) | (pipeline_en & ExLdSt_valid_pipe);
-wire                            ExLdSt_sel_single   = (ExLdSt_macro_selmode == 2'b01) | (pipeline_en & ExLdSt_valid_pipe);
+wire [`Macro_num-1:0]           ExLdSt_valid_pipe   = {ExLdSt_pipe_valid                            ,
+                                                       command_pipeline_reg[0][33]                  ,
+                                                       command_pipeline_reg[1][33]                  ,
+                                                       command_pipeline_reg[2][33]                  ,
+                                                       command_pipeline_reg[3][33]                  ,
+                                                       command_pipeline_reg[4][33]                  ,
+                                                       command_pipeline_reg[5][33]                  ,
+                                                       command_pipeline_reg[6][33]                  };
+wire                            ExLdSt_valid        = (ExLdSt_macro_selmode != 2'b00) | (|({`Macro_num{pipeline_en}} & ExLdSt_valid_pipe));
+wire [`Macro_num-1:0]           ExLdSt_sel_single   = {`Macro_num{ExLdSt_macro_selmode == 2'b01}} | ({`Macro_num{pipeline_en}} & ExLdSt_valid_pipe);
 wire                            ExLdSt_sel_spfull   = (ExLdSt_macro_selmode == 2'b10)               ; 
 wire                            ExLdSt_sel_full     = (ExLdSt_macro_selmode == 2'b11)               ; 
-wire                            ExLdSt_sel_0        = (ExLdSt_macro_sel == 3'b000) | (pipeline_en & command_pipeline_reg[0][33]);
-wire                            ExLdSt_sel_1        = (ExLdSt_macro_sel == 3'b001) | (pipeline_en & command_pipeline_reg[1][33]);
-wire                            ExLdSt_sel_2        = (ExLdSt_macro_sel == 3'b010) | (pipeline_en & command_pipeline_reg[2][33]);
-wire                            ExLdSt_sel_3        = (ExLdSt_macro_sel == 3'b011) | (pipeline_en & command_pipeline_reg[3][33]);
-wire                            ExLdSt_sel_4        = (ExLdSt_macro_sel == 3'b100) | (pipeline_en & command_pipeline_reg[4][33]);
-wire                            ExLdSt_sel_5        = (ExLdSt_macro_sel == 3'b101) | (pipeline_en & command_pipeline_reg[5][33]);
-wire                            ExLdSt_sel_6        = (ExLdSt_macro_sel == 3'b110) | (pipeline_en & command_pipeline_reg[6][33]);
-wire                            ExLdSt_sel_7        = (ExLdSt_macro_sel == 3'b111) | (pipeline_en & command_pipeline_reg[7][33]);
+wire                            ExLdSt_single_sel_0 = (ExLdSt_macro_sel == 3'b000)                  ;
+wire                            ExLdSt_single_sel_1 = (ExLdSt_macro_sel == 3'b001) | (pipeline_en & command_pipeline_reg[0][33]);
+wire                            ExLdSt_single_sel_2 = (ExLdSt_macro_sel == 3'b010) | (pipeline_en & command_pipeline_reg[1][33]);
+wire                            ExLdSt_single_sel_3 = (ExLdSt_macro_sel == 3'b011) | (pipeline_en & command_pipeline_reg[2][33]);
+wire                            ExLdSt_single_sel_4 = (ExLdSt_macro_sel == 3'b100) | (pipeline_en & command_pipeline_reg[3][33]);
+wire                            ExLdSt_single_sel_5 = (ExLdSt_macro_sel == 3'b101) | (pipeline_en & command_pipeline_reg[4][33]);
+wire                            ExLdSt_single_sel_6 = (ExLdSt_macro_sel == 3'b110) | (pipeline_en & command_pipeline_reg[5][33]);
+wire                            ExLdSt_single_sel_7 = (ExLdSt_macro_sel == 3'b111) | (pipeline_en & command_pipeline_reg[6][33]);
+wire [6:0]                      ExLdSt_single_command_0= ExLdSt_command                             ;
+wire [6:0]                      ExLdSt_single_command_1= ExLdSt_command | ({7{pipeline_en}} & command_pipeline_reg[0][32:26]);
+wire [6:0]                      ExLdSt_single_command_2= ExLdSt_command | ({7{pipeline_en}} & command_pipeline_reg[1][32:26]);
+wire [6:0]                      ExLdSt_single_command_3= ExLdSt_command | ({7{pipeline_en}} & command_pipeline_reg[2][32:26]);
+wire [6:0]                      ExLdSt_single_command_4= ExLdSt_command | ({7{pipeline_en}} & command_pipeline_reg[3][32:26]);
+wire [6:0]                      ExLdSt_single_command_5= ExLdSt_command | ({7{pipeline_en}} & command_pipeline_reg[4][32:26]);
+wire [6:0]                      ExLdSt_single_command_6= ExLdSt_command | ({7{pipeline_en}} & command_pipeline_reg[5][32:26]);
+wire [6:0]                      ExLdSt_single_command_7= ExLdSt_command | ({7{pipeline_en}} & command_pipeline_reg[6][32:26]);
 ///////////////////  Macro 0-7 ExLdSt Command  //////////////////////////////////////////
 // valid signal
-wire [`Macro_num-1:0]           ExLdSt_valid_single = {ExLdSt_sel_0,
-                                                       ExLdSt_sel_1,
-                                                       ExLdSt_sel_2,
-                                                       ExLdSt_sel_3,
-                                                       ExLdSt_sel_4,
-                                                       ExLdSt_sel_5,
-                                                       ExLdSt_sel_6,
-                                                       ExLdSt_sel_7};
+wire [`Macro_num-1:0]           ExLdSt_valid_single = {ExLdSt_single_sel_0,
+                                                       ExLdSt_single_sel_1,
+                                                       ExLdSt_single_sel_2,
+                                                       ExLdSt_single_sel_3,
+                                                       ExLdSt_single_sel_4,
+                                                       ExLdSt_single_sel_5,
+                                                       ExLdSt_single_sel_6,
+                                                       ExLdSt_single_sel_7};
 assign                          {ExLdSt_valid_0,
                                  ExLdSt_valid_1,
                                  ExLdSt_valid_2,
@@ -287,17 +297,17 @@ assign                          {ExLdSt_valid_0,
                                  ExLdSt_valid_4,
                                  ExLdSt_valid_5,
                                  ExLdSt_valid_6,
-                                 ExLdSt_valid_7}    = ({`Macro_num{ExLdSt_sel_single}} & ExLdSt_valid_single)   | 
+                                 ExLdSt_valid_7}    = (ExLdSt_sel_single & ExLdSt_valid_single)   | 
                                                       ({`Macro_num{ExLdSt_sel_spfull | ExLdSt_sel_full}})       ;
 // command signal
-wire [`Row_num_bit:0]           ExLdSt_command_single=({(`Row_num_bit+1){ExLdSt_sel_0}} & ExLdSt_command) |
-                                                      ({(`Row_num_bit+1){ExLdSt_sel_1}} & ExLdSt_command) |
-                                                      ({(`Row_num_bit+1){ExLdSt_sel_2}} & ExLdSt_command) |
-                                                      ({(`Row_num_bit+1){ExLdSt_sel_3}} & ExLdSt_command) |
-                                                      ({(`Row_num_bit+1){ExLdSt_sel_4}} & ExLdSt_command) |
-                                                      ({(`Row_num_bit+1){ExLdSt_sel_5}} & ExLdSt_command) |
-                                                      ({(`Row_num_bit+1){ExLdSt_sel_6}} & ExLdSt_command) |
-                                                      ({(`Row_num_bit+1){ExLdSt_sel_7}} & ExLdSt_command) ;
+wire [`Macro_num*(`Row_num_bit+1)-1:0]ExLdSt_command_single={({(`Row_num_bit+1){ExLdSt_sel_single[7] & ExLdSt_single_sel_0}} & ExLdSt_single_command_0)    ,
+                                                             ({(`Row_num_bit+1){ExLdSt_sel_single[6] & ExLdSt_single_sel_1}} & ExLdSt_single_command_1)    ,
+                                                             ({(`Row_num_bit+1){ExLdSt_sel_single[5] & ExLdSt_single_sel_2}} & ExLdSt_single_command_2)    ,
+                                                             ({(`Row_num_bit+1){ExLdSt_sel_single[4] & ExLdSt_single_sel_3}} & ExLdSt_single_command_3)    ,
+                                                             ({(`Row_num_bit+1){ExLdSt_sel_single[3] & ExLdSt_single_sel_4}} & ExLdSt_single_command_4)    ,
+                                                             ({(`Row_num_bit+1){ExLdSt_sel_single[2] & ExLdSt_single_sel_5}} & ExLdSt_single_command_5)    ,
+                                                             ({(`Row_num_bit+1){ExLdSt_sel_single[1] & ExLdSt_single_sel_6}} & ExLdSt_single_command_6)    ,
+                                                             ({(`Row_num_bit+1){ExLdSt_sel_single[0] & ExLdSt_single_sel_7}} & ExLdSt_single_command_7)}   ;
 assign                          {ExLdSt_command_0,
                                  ExLdSt_command_1,
                                  ExLdSt_command_2,
@@ -305,25 +315,25 @@ assign                          {ExLdSt_command_0,
                                  ExLdSt_command_4,
                                  ExLdSt_command_5,
                                  ExLdSt_command_6,
-                                 ExLdSt_command_7}  = ({(`Macro_num*(`Row_num_bit+1)){ExLdSt_sel_single}} & ExLdSt_command_single) |
+                                 ExLdSt_command_7}  = ExLdSt_command_single |
                                                       ({(`Macro_num*(`Row_num_bit+1)){ExLdSt_sel_spfull | ExLdSt_sel_full}} & {`Macro_num{ExLdSt_command}});
 // rd_data signal
-wire [`Macro_num*`Col_num-1:0]  DRAM_rd_data_single = ({`Col_num{ExLdSt_sel_0}} & DRAM_rd_data)     |
-                                                      ({`Col_num{ExLdSt_sel_1}} & DRAM_rd_data)     |
-                                                      ({`Col_num{ExLdSt_sel_2}} & DRAM_rd_data)     |
-                                                      ({`Col_num{ExLdSt_sel_3}} & DRAM_rd_data)     |
-                                                      ({`Col_num{ExLdSt_sel_4}} & DRAM_rd_data)     |
-                                                      ({`Col_num{ExLdSt_sel_5}} & DRAM_rd_data)     |
-                                                      ({`Col_num{ExLdSt_sel_6}} & DRAM_rd_data)     |
-                                                      ({`Col_num{ExLdSt_sel_7}} & DRAM_rd_data)     ;  
-wire [`Macro_num*`Col_num-1:0]  DRAM_rd_data_spfull = {{`Macro_num{DRAM_rd_data[ 15:  0]}}          ,
-                                                       {`Macro_num{DRAM_rd_data[ 31: 16]}}          ,
-                                                       {`Macro_num{DRAM_rd_data[ 47: 32]}}          ,
-                                                       {`Macro_num{DRAM_rd_data[ 63: 48]}}          ,
-                                                       {`Macro_num{DRAM_rd_data[ 79: 64]}}          ,
-                                                       {`Macro_num{DRAM_rd_data[ 95: 80]}}          ,
+wire [`Macro_num*`Col_num-1:0]  DRAM_rd_data_single = {({`Col_num{ExLdSt_sel_single[7] & ExLdSt_single_sel_0}} & DRAM_rd_data)  ,
+                                                       ({`Col_num{ExLdSt_sel_single[6] & ExLdSt_single_sel_1}} & DRAM_rd_data)  ,
+                                                       ({`Col_num{ExLdSt_sel_single[5] & ExLdSt_single_sel_2}} & DRAM_rd_data)  ,
+                                                       ({`Col_num{ExLdSt_sel_single[4] & ExLdSt_single_sel_3}} & DRAM_rd_data)  ,
+                                                       ({`Col_num{ExLdSt_sel_single[3] & ExLdSt_single_sel_4}} & DRAM_rd_data)  ,
+                                                       ({`Col_num{ExLdSt_sel_single[2] & ExLdSt_single_sel_5}} & DRAM_rd_data)  ,
+                                                       ({`Col_num{ExLdSt_sel_single[1] & ExLdSt_single_sel_6}} & DRAM_rd_data)  ,
+                                                       ({`Col_num{ExLdSt_sel_single[0] & ExLdSt_single_sel_7}} & DRAM_rd_data)} ;  
+wire [`Macro_num*`Col_num-1:0]  DRAM_rd_data_spfull = {{`Macro_num{DRAM_rd_data[127:112]}}          ,
                                                        {`Macro_num{DRAM_rd_data[111: 96]}}          ,
-                                                       {`Macro_num{DRAM_rd_data[127:112]}}}         ;  
+                                                       {`Macro_num{DRAM_rd_data[ 95: 80]}}          ,
+                                                       {`Macro_num{DRAM_rd_data[ 79: 64]}}          ,
+                                                       {`Macro_num{DRAM_rd_data[ 63: 48]}}          ,
+                                                       {`Macro_num{DRAM_rd_data[ 47: 32]}}          ,
+                                                       {`Macro_num{DRAM_rd_data[ 31: 16]}}          ,
+                                                       {`Macro_num{DRAM_rd_data[ 15:  0]}}}         ;  
 wire [`Macro_num*`Col_num-1:0]  DRAM_rd_data_full   = {`Macro_num{DRAM_rd_data}}                    ;
 assign                          {ExLdSt_wr_data_0,
                                  ExLdSt_wr_data_1,
@@ -332,43 +342,42 @@ assign                          {ExLdSt_wr_data_0,
                                  ExLdSt_wr_data_4,
                                  ExLdSt_wr_data_5,
                                  ExLdSt_wr_data_6,
-                                 ExLdSt_wr_data_7}  = ({(`Macro_num*`Col_num){ExLdSt_sel_single}} & DRAM_rd_data_single) | 
+                                 ExLdSt_wr_data_7}  = DRAM_rd_data_single | 
                                                       ({(`Macro_num*`Col_num){ExLdSt_sel_spfull}} & DRAM_rd_data_spfull) |
                                                       ({(`Macro_num*`Col_num){ExLdSt_sel_full  }} & DRAM_rd_data_full  ) ;
 ///////////////////  DRAM Interface  //////////////////////////////////////////
 assign                          DRAM_valid          = ExLdSt_valid                                  ;
-wire                            ExLdSt_wr_en_pipe   = (pipeline_en & command_pipeline_reg[0][32])   |
-                                                      (pipeline_en & command_pipeline_reg[1][32])   |
-                                                      (pipeline_en & command_pipeline_reg[2][32])   |
-                                                      (pipeline_en & command_pipeline_reg[3][32])   |
-                                                      (pipeline_en & command_pipeline_reg[4][32])   |
-                                                      (pipeline_en & command_pipeline_reg[5][32])   |
-                                                      (pipeline_en & command_pipeline_reg[6][32])   |
-                                                      (pipeline_en & command_pipeline_reg[7][32])   ;
-assign                          DRAM_wr_en          = ~(ExLdSt_command[`Row_num_bit] | ExLdSt_wr_en_pipe);
+wire                            ExLdSt_wr_en_pipe   = command_pipeline_reg[0][32]                   |
+                                                      command_pipeline_reg[1][32]                   |
+                                                      command_pipeline_reg[2][32]                   |
+                                                      command_pipeline_reg[3][32]                   |
+                                                      command_pipeline_reg[4][32]                   |
+                                                      command_pipeline_reg[5][32]                   |
+                                                      command_pipeline_reg[6][32]                   ;
+assign                          DRAM_wr_en          = ~((ExLdSt_command[`Row_num_bit]) | (pipeline_en & ExLdSt_wr_en_pipe));
 assign                          DRAM_addr           = ddr_addr_table[ExLdSt_ddr_addr]               ;
-wire [`Col_num-1:0]             DRAM_wr_data_single = ({`Col_num{ExLdSt_sel_0}} & ExLdSt_rd_data_0) |
-                                                      ({`Col_num{ExLdSt_sel_1}} & ExLdSt_rd_data_1) |
-                                                      ({`Col_num{ExLdSt_sel_2}} & ExLdSt_rd_data_2) |
-                                                      ({`Col_num{ExLdSt_sel_3}} & ExLdSt_rd_data_3) |
-                                                      ({`Col_num{ExLdSt_sel_4}} & ExLdSt_rd_data_4) |
-                                                      ({`Col_num{ExLdSt_sel_5}} & ExLdSt_rd_data_5) |
-                                                      ({`Col_num{ExLdSt_sel_6}} & ExLdSt_rd_data_6) |
-                                                      ({`Col_num{ExLdSt_sel_7}} & ExLdSt_rd_data_7) ;
-assign                          DRAM_wr_data        = {`Col_num{~DRAM_wr_en}} & DRAM_wr_data_single ;
+wire [`Col_num-1:0]             DRAM_wr_data_single = ({`Col_num{ExLdSt_single_sel_0}} & ExLdSt_rd_data_0) |
+                                                      ({`Col_num{ExLdSt_single_sel_1}} & ExLdSt_rd_data_1) |
+                                                      ({`Col_num{ExLdSt_single_sel_2}} & ExLdSt_rd_data_2) |
+                                                      ({`Col_num{ExLdSt_single_sel_3}} & ExLdSt_rd_data_3) |
+                                                      ({`Col_num{ExLdSt_single_sel_4}} & ExLdSt_rd_data_4) |
+                                                      ({`Col_num{ExLdSt_single_sel_5}} & ExLdSt_rd_data_5) |
+                                                      ({`Col_num{ExLdSt_single_sel_6}} & ExLdSt_rd_data_6) |
+                                                      ({`Col_num{ExLdSt_single_sel_7}} & ExLdSt_rd_data_7) ;
+assign                          DRAM_wr_data        = {`Col_num{DRAM_wr_en}} & DRAM_wr_data_single ;
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////  Compute Macro 0-7 Command  //////////////////////////////////////////
 // valid signal
-wire [`Macro_num-1:0]           Compute_valid_pipe  = {command_pipeline_reg[0][25],
+wire [`Macro_num-1:0]           Compute_valid_pipe  = {Compute_macro_sel[0]       ,
+                                                       command_pipeline_reg[0][25],
                                                        command_pipeline_reg[1][25],
                                                        command_pipeline_reg[2][25],
                                                        command_pipeline_reg[3][25],
                                                        command_pipeline_reg[4][25],
                                                        command_pipeline_reg[5][25],
-                                                       command_pipeline_reg[6][25],
-                                                       command_pipeline_reg[7][25]};
+                                                       command_pipeline_reg[6][25]};
 assign                          {Compute_valid_0,
                                  Compute_valid_1,
                                  Compute_valid_2,
@@ -378,14 +387,14 @@ assign                          {Compute_valid_0,
                                  Compute_valid_6,
                                  Compute_valid_7}   = pipeline_en ? Compute_valid_pipe : Compute_macro_sel;
 // command signal
-wire [`Macro_num*25-1:0]        Compute_command_pipe= {command_pipeline_reg[0][24:0],
+wire [`Macro_num*25-1:0]        Compute_command_pipe= {Compute_command              ,
+                                                       command_pipeline_reg[0][24:0],
                                                        command_pipeline_reg[1][24:0],
                                                        command_pipeline_reg[2][24:0],
                                                        command_pipeline_reg[3][24:0],
                                                        command_pipeline_reg[4][24:0],
                                                        command_pipeline_reg[5][24:0],
-                                                       command_pipeline_reg[6][24:0],
-                                                       command_pipeline_reg[7][24:0]};
+                                                       command_pipeline_reg[6][24:0]};
 assign                          {Compute_command_0,
                                  Compute_command_1,
                                  Compute_command_2,
